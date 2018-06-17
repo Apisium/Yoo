@@ -21,8 +21,14 @@
     "typescript": "^2.9.1"
   },
   "devDependencies": {
+    "cz-conventional-changelog": "^2.1.0",
     "ts-node": "^6.0.5",
     "tslint": "^5.10.0",
     "tslint-config-standard": "^7.0.0"
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
   }
 }
