@@ -8,7 +8,7 @@
     "allowSyntheticDefaultImports": true
   },
   "include": [
-    "src"
+    "complier/**/*"
   ],
   "exclude": [
     "node_modules"

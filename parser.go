@@ -4,22 +4,19 @@ import (
   "fmt"
   "time"
   "errors"
+  "strconv"
+  "net/http"
 )
-
-var pool []string
 
 type Variables map[string]Any
 type TSFunction func(args *[]Any) Any
 var global = make(Variables)
+var modules = make(Variables)
 
 func init() {
   var log TSFunction = func (args *[]Any) Any {
     for _, v := range *args {
-      if o, ok := v.(*Any); ok {
-        fmt.Print(*o, " ")
-      } else {
-        fmt.Print(v, " ")
-      }
+      fmt.Print(v, " ")
     }
     fmt.Println()
     return nil
@@ -28,72 +25,127 @@ func init() {
     []string{ "log" },
     []Any{ &log },
   )
-}
 
-func findObject(object Any, variables *Variables) Any {
-  if obj1, ok1 := object.(*Any); ok1 {
-    obj := *obj1
-    if o, ok := obj.(*Identifier); ok {
-      return (*variables)[o.text]
-    } else if o, ok := obj.(*String); ok {
-      return pool[o.id]
+  var Server TSFunction = func (args *[]Any) Any {
+    handler := *(*args)[0].(*TSFunction)
+    var h http.HandlerFunc = func (w http.ResponseWriter, r *http.Request) {
+      defer trace()()
+      handler(nil)
+      fmt.Fprint(w, "Hello World!")
     }
-  } else if fn, ok1 := object.(*TSFunction); ok1 {
-    return fn
+    server := http.Server{
+      Addr: "127.0.0.1:1234",
+      Handler: h,
+    }
+    server.ListenAndServe()
+    return nil
   }
-  return nil
+  modules["http"] = CreateObject(
+    []string{ "Server" },
+    []Any{ &Server },
+  )
 }
 
-func expression(ba *ByteArray, variables *Variables) (Any, error) {
+func expression(ba *ByteArray, pool *[]string) (Any, error) {
   ret, err := ba.ReadInt8()
   if err != nil { return nil, err }
 
-  if ret == CONSTANT_IDENTIFIER { return NewIdentifier(ba) }
-  if ret == CONSTANT_STRING { return NewString(ba) }
-  if ret == CONSTANT_CALL {
-    fn, err := NewCall(ba, variables)
+  switch ret {
+  case CONSTANT_TRUE:
+    return true, nil
+  case CONSTANT_FALSE:
+    return false, nil
+  case CONSTANT_STRING:
+    id, err := ba.ReadInt16()
     if err != nil { return nil, err }
-    callee := findObject(fn.callee, variables)
+    return (*pool)[int(id)], nil
+  case CONSTANT_IDENTIFIER:
+    return NewIdentifier(ba, pool)
+  case CONSTANT_CALL:
+    return NewCall(ba, pool)
+  case CONSTANT_MEMBER:
+    return NewMember(ba, pool)
+  case CONSTANT_VARIABLE:
+    return NewVariable(ba, pool)
+  case CONSTANT_IMPORT:
+    return NewImport(ba, pool)
+  case CONSTANT_NULL:
+    return nil, nil
+  case CONSTANT_ARROW_FUNCTION:
+    return NewArrowFunction(ba, pool)
+  default:
+    return nil, errors.New("No such token: 0x" + strconv.FormatInt(int64(ret), 16))
+  }
+}
 
-    argsA := *fn.args
+func execute(object Any, variables *Variables) (Any, error) {
+  obj := object
+  if obj1, ok1 := object.(*Any); ok1 {
+    obj = *obj1
+  }
+  switch o := obj.(type) {
+  case string:
+    return o, nil
+  case bool:
+    return o, nil
+  case *Identifier:
+    return (*variables)[o.text], nil
+  case *TSFunction:
+    return o, nil
+  case *Call:
+    callee, err := execute(o.callee, variables)
+    if err != nil { return nil, err }
+    argsA := *o.args
     length := len(argsA)
     args := make([]Any, length, length)
     for k, v := range argsA {
-      args[k] = findObject(v, variables)
+      arg, err := execute(v, variables)
+      if err != nil { return nil, err }
+      args[k] = arg
     }
     return (*callee.(*TSFunction))(&args), nil
-  }
-  if ret == CONSTANT_MEMBER {
-    member, err := NewMember(ba, variables)
+  case *Member:
+    left, err := execute(o.left, variables)
     if err != nil { return nil, err }
-    left := findObject(member.left, variables)
-    rightA, ok := member.right.(*Identifier)
+    rightA, ok := o.right.(*Identifier)
     var right string
     if ok {
       right = rightA.text
     } else {
-      right = findObject(member.right, variables).(string)
+      ret, err := execute(o.right, variables)
+      if err != nil { return nil, err }
+      right = ret.(string)
     }
     return GetValue(left, right), nil
-  }
-  if ret == CONSTANT_VARIABLE {
-    list, err := NewVariable(ba, variables)
-    if err != nil { return nil, err }
+  case *Variable:
     vars := *variables
-    for _, elem := range (*list) {
-      vars[elem.name.text] = elem.value
+    for _, elem := range (*o) {
+      v, err := execute(elem.value, variables)
+      if err != nil { return nil, err }
+      vars[elem.name.text] = v
     }
-    return nil, nil
+  case *Import:
+    name := o.path
+    module := modules[name]
+    if module == nil { return nil, errors.New("No such module: " + name) }
+    vars := *variables
+    for _, elem := range (*o.importeds) {
+      vars[elem.name.text] = GetValue(module, elem.prop.text)
+    }
+  case *ArrowFunction:
+    vars := copyMap(variables)
+    var fn TSFunction = func (args *[]Any) Any {
+      for _, v := range (*o.body) {
+        execute(v, vars)
+      }
+      return nil
+    }
+    return &fn, nil
   }
-  if ret == CONSTANT_NULL {
-    return nil, nil
-  }
-
-  return nil, errors.New("No such token: " + string(ret))
+  return nil, nil
 }
 
-func Parse(buff []byte) (err error) {
-  defer trace()()
+func ImportFile(buff []byte) (err error) {
   ba := CreateByteArray(buff)
   head, err := ba.ReadString(3)
   if err != nil || head != "YOO" {
@@ -104,22 +156,15 @@ func Parse(buff []byte) (err error) {
   if version != VERSION {
     return errors.New("Version error")
   }
-  // fmt.Println("Version:", version)
-
-  ret, err := ba.ReadInt8()
-  if err != nil || ret != CONSTANT_STRINGS_START {
-    return errors.New("Strings pool error")
-  }
 
   length, err := ba.ReadInt16()
   if err != nil {
     return errors.New("Strings pool error")
   }
-  // fmt.Println("String pool length:", length)
 
-  pool = make([]string, length, length)
+  pool := make([]string, length, length)
   for i := int16(0); i < length; i++ {
-    len, err := ba.ReadInt64()
+    len, err := ba.ReadInt16()
     if err != nil {
       return err
     }
@@ -129,14 +174,21 @@ func Parse(buff []byte) (err error) {
     }
     pool[i] = str
   }
-  code, err := ba.ReadInt8()
-  if err != nil || code != CONSTANT_STRINGS_END {
-    return
+
+  length, err = ba.ReadInt16()
+  if err != nil {
+    return errors.New("Expression error")
   }
 
+  poolPtr := &pool
   vars := copyMap(&global)
-  for ba.Available() > 0 {
-    expression(ba, vars)
+  length--
+  for length > 0 {
+    length--
+    obj, err := expression(ba, poolPtr)
+    if err != nil { return err }
+    _, err = execute(obj, vars)
+    if err != nil { return err }
   }
 
   return nil

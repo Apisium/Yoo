@@ -1,8 +1,8 @@
 package yoo
 
 import (
+  "errors"
   "encoding/binary"
-  "io"
 )
 
 type ByteArray struct {
@@ -46,10 +46,10 @@ func (this *ByteArray) GetEndian() binary.ByteOrder {
   return this.endian
 }
 
-func (this *ByteArray) SetWritePos(pos int) error{
+func (this *ByteArray) SetWritePos(pos int) error {
   if pos > this.Length() {
     this.posWrite = this.Length()
-    return io.EOF
+    return errors.New("Buffer end")
   } else {
     this.posWrite = pos
   }
@@ -60,14 +60,14 @@ func (this *ByteArray) SetWriteEnd() {
   this.SetWritePos(this.Length())
 }
 
-func (this *ByteArray) GetWritePos() int{
+func (this *ByteArray) GetWritePos() int {
   return this.posWrite
 }
 
-func (this *ByteArray) SetReadPos(pos int) error{
+func (this *ByteArray) SetReadPos(pos int) error {
   if pos > this.Length() {
     this.posRead = this.Length()
-    return io.EOF
+    return errors.New("Buffer end")
   } else {
     this.posRead = pos
   }
@@ -78,11 +78,11 @@ func (this *ByteArray) SetReadEnd() {
   this.SetReadPos(this.Length())
 }
 
-func (this *ByteArray) GetReadPos() int{
+func (this *ByteArray) GetReadPos() int {
   return this.posRead
 }
 
-func (this *ByteArray) Seek(pos int) error{
+func (this *ByteArray) Seek(pos int) error {
   err := this.SetWritePos(pos)
   this.SetReadPos(pos)
 
@@ -107,7 +107,7 @@ func (this *ByteArray) Read(bytes []byte) (l int, err error) {
     return
   }
   if len(bytes) > this.Length() - this.posRead{
-    return 0, io.EOF
+    return 0, errors.New("Buffer end")
   }
   l = copy(bytes, this.buf[this.posRead:])
   this.posRead += l

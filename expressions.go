@@ -1,71 +1,106 @@
 package yoo
 
-type Identifier struct {
-	text string
-}
-func NewIdentifier(ba *ByteArray) (*Identifier, error) {
-	ret, err := ba.ReadInt64()
-	if err != nil { return nil, err }
-	text, err := ba.ReadString(int(ret))
-	if err != nil { return nil, err }
-	return &Identifier{ text: text }, nil
-}
+type Block []Any
 
-type String struct {
-	id int
+type Identifier struct {
+  text string
 }
-func NewString(ba *ByteArray) (*String, error) {
-	id, err := ba.ReadInt16()
-	if err != nil { return nil, err }
-	return &String{ id: int(id) }, nil
+func NewIdentifier(ba *ByteArray, pool *[]string) (*Identifier, error) {
+  id, err := ba.ReadInt16()
+  if err != nil { return nil, err }
+  return &Identifier{ text: (*pool)[int(id)] }, nil
 }
 
 type Call struct {
-	callee Any
-	args *[]Any
+  callee Any
+  args *[]Any
 }
-func NewCall(ba *ByteArray, variables *Variables) (*Call, error) {
-	callee, err := expression(ba, variables)
-	if err != nil { return nil, err }
-	length, err := ba.ReadInt16()
-	if err != nil { return nil, err }
+func NewCall(ba *ByteArray, pool *[]string) (*Call, error) {
+  callee, err := expression(ba, pool)
+  if err != nil { return nil, err }
+  length, err := ba.ReadInt16()
+  if err != nil { return nil, err }
 
-	pool := make([]Any, length, length)
-	for i := int16(0); i < length; i++ {
-		arg, err := expression(ba, variables)
-		if err != nil { return nil, err }
-		pool[i] = &arg
-	}
-	return &Call{ callee: callee, args: &pool }, nil
+  args := make([]Any, length, length)
+  for i := int16(0); i < length; i++ {
+    arg, err := expression(ba, pool)
+    if err != nil { return nil, err }
+    args[i] = &arg
+  }
+  return &Call{ callee: callee, args: &args }, nil
 }
 
 type Member struct {
-	left Any
-	right Any
+  left Any
+  right Any
 }
-func NewMember(ba *ByteArray, variables *Variables) (*Member, error) {
-	left, err := expression(ba, variables)
-	if err != nil { return nil, err }
-	right, err := expression(ba, variables)
-	if err != nil { return nil, err }
-	return &Member{ left: &left, right: &right }, nil
+func NewMember(ba *ByteArray, pool *[]string) (*Member, error) {
+  left, err := expression(ba, pool)
+  if err != nil { return nil, err }
+  right, err := expression(ba, pool)
+  if err != nil { return nil, err }
+  return &Member{ left: &left, right: &right }, nil
 }
 
 type VariableElement struct {
-	name *Identifier
-	value Any
+  name *Identifier
+  value Any
 }
 type Variable []*VariableElement
-func NewVariable(ba *ByteArray, variables *Variables) (*Variable, error) {
-	length, err := ba.ReadInt16()
-	if err != nil { return nil, err }
-	pool := make(Variable, length, length)
-	for i := int16(0); i < length; i++ {
-		left, err := expression(ba, variables)
-		if err != nil { return nil, err }
-		right, err := expression(ba, variables)
-		if err != nil { return nil, err }
-		pool[i] = &VariableElement{ name: left.(*Identifier), value: &right }
-	}
-	return &pool, nil
+func NewVariable(ba *ByteArray, pool *[]string) (*Variable, error) {
+  length, err := ba.ReadInt16()
+  if err != nil { return nil, err }
+  vars := make(Variable, length, length)
+  for i := int16(0); i < length; i++ {
+    left, err := expression(ba, pool)
+    if err != nil { return nil, err }
+    right, err := expression(ba, pool)
+    if err != nil { return nil, err }
+    vars[i] = &VariableElement{ name: left.(*Identifier), value: &right }
+  }
+  return &vars, nil
+}
+
+type Imported struct {
+  name *Identifier
+  prop *Identifier
+}
+type Import struct {
+  path string
+  importeds *[]*Imported
+}
+func NewImport(ba *ByteArray, pool *[]string) (*Import, error) {
+  path, err := expression(ba, pool)
+  if err != nil { return nil, err }
+  length, err := ba.ReadInt16()
+  if err != nil { return nil, err }
+
+  imports := make([]*Imported, length, length)
+  for i := int16(0); i < length; i++ {
+    name, err := expression(ba, pool)
+    if err != nil { return nil, err }
+    prop, err := expression(ba, pool)
+    if err != nil { return nil, err }
+    imports[i] = &Imported{ name: name.(*Identifier), prop: prop.(*Identifier) }
+  }
+  return &Import{ path: path.(string), importeds: &imports }, nil
+}
+
+type ArrowFunction struct {
+  async bool
+  body *Block
+}
+func NewArrowFunction(ba *ByteArray, pool *[]string) (*ArrowFunction, error) {
+  async, err := expression(ba, pool)
+  if err != nil { return nil, err }
+  length, err := ba.ReadInt16()
+  if err != nil { return nil, err }
+
+  block := make(Block, length, length)
+  for i := int16(0); i < length; i++ {
+    expr, err := expression(ba, pool)
+    if err != nil { return nil, err }
+    block[i] = expr
+  }
+  return &ArrowFunction{ async: async.(bool), body: &block }, nil
 }
