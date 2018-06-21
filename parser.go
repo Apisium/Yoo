@@ -5,45 +5,16 @@ import (
   "time"
   "errors"
   "strconv"
-  "net/http"
 )
 
 type Variables map[string]Any
 type TSFunction func(args *[]Any) Any
-var global = make(Variables)
-var modules = make(Variables)
+var modulesPtr = GetBindings()
+var global = GetGlobal(modulesPtr)
+var modules = *modulesPtr
 
 func init() {
-  var log TSFunction = func (args *[]Any) Any {
-    for _, v := range *args {
-      fmt.Print(v, " ")
-    }
-    fmt.Println()
-    return nil
-  }
-  global["console"] = CreateObject(
-    []string{ "log" },
-    []Any{ &log },
-  )
 
-  var Server TSFunction = func (args *[]Any) Any {
-    handler := *(*args)[0].(*TSFunction)
-    var h http.HandlerFunc = func (w http.ResponseWriter, r *http.Request) {
-      defer trace()()
-      handler(nil)
-      fmt.Fprint(w, "Hello World!")
-    }
-    server := http.Server{
-      Addr: "127.0.0.1:1234",
-      Handler: h,
-    }
-    server.ListenAndServe()
-    return nil
-  }
-  modules["http"] = CreateObject(
-    []string{ "Server" },
-    []Any{ &Server },
-  )
 }
 
 func expression(ba *ByteArray, pool *[]string) (Any, error) {
@@ -59,6 +30,12 @@ func expression(ba *ByteArray, pool *[]string) (Any, error) {
     id, err := ba.ReadInt16()
     if err != nil { return nil, err }
     return (*pool)[int(id)], nil
+  case CONSTANT_NUMBER:
+    length, err := ba.ReadInt16()
+    if err != nil { return nil, err }
+    text, err := ba.ReadString(int(length))
+    if err != nil { return nil, err }
+    return strconv.ParseFloat(text, 64)
   case CONSTANT_IDENTIFIER:
     return NewIdentifier(ba, pool)
   case CONSTANT_CALL:
@@ -78,7 +55,7 @@ func expression(ba *ByteArray, pool *[]string) (Any, error) {
   }
 }
 
-func execute(object Any, variables *Variables) (Any, error) {
+func execute(object Any, variables *Variables, variables2 *Variables) (Any, error) {
   obj := object
   if obj1, ok1 := object.(*Any); ok1 {
     obj = *obj1
@@ -86,33 +63,45 @@ func execute(object Any, variables *Variables) (Any, error) {
   switch o := obj.(type) {
   case string:
     return o, nil
+  case float64:
+    return o, nil
   case bool:
     return o, nil
   case *Identifier:
-    return (*variables)[o.text], nil
+    value := (*variables)[o.text]
+    if value == nil && variables2 != nil {
+      value = (*variables2)[o.text]
+    }
+    return value, nil
   case *TSFunction:
     return o, nil
+  case *Proxy:
+    return o, nil
   case *Call:
-    callee, err := execute(o.callee, variables)
+    callee, err := execute(o.callee, variables, variables2)
     if err != nil { return nil, err }
     argsA := *o.args
     length := len(argsA)
     args := make([]Any, length, length)
     for k, v := range argsA {
-      arg, err := execute(v, variables)
+      arg, err := execute(v, variables, variables2)
       if err != nil { return nil, err }
       args[k] = arg
     }
-    return (*callee.(*TSFunction))(&args), nil
+    if fn, ok := callee.(*TSFunction); ok {
+      a := (*fn)(&args)
+      return a, nil
+    }
+    return nil, errors.New(fmt.Sprintf("%+v is not a function.", callee))
   case *Member:
-    left, err := execute(o.left, variables)
+    left, err := execute(o.left, variables, variables2)
     if err != nil { return nil, err }
     rightA, ok := o.right.(*Identifier)
     var right string
     if ok {
       right = rightA.text
     } else {
-      ret, err := execute(o.right, variables)
+      ret, err := execute(o.right, variables, variables2)
       if err != nil { return nil, err }
       right = ret.(string)
     }
@@ -120,7 +109,7 @@ func execute(object Any, variables *Variables) (Any, error) {
   case *Variable:
     vars := *variables
     for _, elem := range (*o) {
-      v, err := execute(elem.value, variables)
+      v, err := execute(elem.value, variables, variables2)
       if err != nil { return nil, err }
       vars[elem.name.text] = v
     }
@@ -133,10 +122,24 @@ func execute(object Any, variables *Variables) (Any, error) {
       vars[elem.name.text] = GetValue(module, elem.prop.text)
     }
   case *ArrowFunction:
-    vars := copyMap(variables)
+    pars := *o.args
     var fn TSFunction = func (args *[]Any) Any {
+      vars := copyMap(variables)
+      varsV := *vars
+      argsV := *args
+      length := len(argsV) - 1
+      for i, v := range pars {
+        var value Any
+        if i <= length {
+          value = argsV[i]
+        }
+        if value == nil {
+          value = v.value
+        }
+        varsV[v.name.text] = value
+      }
       for _, v := range (*o.body) {
-        execute(v, vars)
+        execute(v, vars, variables)
       }
       return nil
     }
@@ -181,13 +184,13 @@ func ImportFile(buff []byte) (err error) {
   }
 
   poolPtr := &pool
-  vars := copyMap(&global)
+  vars := copyMap(global)
   length--
   for length > 0 {
     length--
     obj, err := expression(ba, poolPtr)
     if err != nil { return err }
-    _, err = execute(obj, vars)
+    _, err = execute(obj, vars, nil)
     if err != nil { return err }
   }
 

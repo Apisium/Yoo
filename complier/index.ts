@@ -1,5 +1,5 @@
 import * as ts from 'typescript'
-import { createWriteStream } from 'fs'
+import { readFileSync, createWriteStream } from 'fs'
 import BufferList = require('bl')
 
 const YOO = Buffer.from('YOO')
@@ -16,6 +16,7 @@ const CONSTANT_IMPORT = Buffer.from([0x07])
 const CONSTANT_ARROW_FUNCTION = Buffer.from([0x08])
 const CONSTANT_TRUE = Buffer.from([0x09])
 const CONSTANT_FALSE = Buffer.from([0x10])
+const CONSTANT_NEW = Buffer.from([0x11])
 
 const writeIdentifier = (buf: BufferList, pool: string[], text: string) => {
   buf.append(CONSTANT_IDENTIFIER)
@@ -32,11 +33,21 @@ const writeLength = (buf: BufferList, len: number) => {
   length.writeInt16BE(len, 0)
   buf.append(length)
 }
+const writeArguments = (buf: BufferList, args: ts.NodeArray<ts.ParameterDeclaration |
+  ts.VariableDeclaration>, pool: string[]) => {
+  writeLength(buf, args.length)
+  args.forEach(arg => {
+    expression(arg.name, buf, pool)
+    expression(arg.initializer, buf, pool)
+  })
+}
 const writeBoolean = (buf: BufferList, val: boolean) => buf.append(val ? CONSTANT_TRUE : CONSTANT_FALSE)
 
 const expression = (n: ts.Node, buf: BufferList, pool: string[]) => {
-  if (ts.isExpressionStatement(n)) n = n.expression
-  if (ts.isIdentifier(n)) {
+  if (n && ts.isExpressionStatement(n)) n = n.expression
+  if (!n || n.kind === ts.SyntaxKind.NullKeyword || n.kind === ts.SyntaxKind.UndefinedKeyword) {
+    buf.append(CONSTANT_NULL)
+  } else if (ts.isIdentifier(n)) {
     writeIdentifier(buf, pool, n.text)
   } else if (ts.isCallExpression(n)) {
     buf.append(CONSTANT_CALL)
@@ -55,15 +66,8 @@ const expression = (n: ts.Node, buf: BufferList, pool: string[]) => {
     expression(n.argumentExpression, buf, pool)
   } else if (ts.isVariableStatement(n)) {
     if (n.getFirstToken().kind === ts.SyntaxKind.VarKeyword) throw new SyntaxError('Is not supported: Var keyword.')
-    const des = n.declarationList.declarations
     buf.append(CONSTANT_VARIABLE)
-    writeLength(buf, des.length)
-    des.forEach(d => {
-      expression(d.name, buf, pool)
-      expression(d.initializer, buf, pool)
-    })
-  } else if (!n || n.kind === ts.SyntaxKind.NullKeyword || n.kind === ts.SyntaxKind.UndefinedKeyword) {
-    buf.append(CONSTANT_NULL)
+    writeArguments(buf, n.declarationList.declarations, pool)
   } else if (ts.isInterfaceDeclaration(n)) {
     n.members.forEach(e => {
       console.log(ts.SyntaxKind[e.kind])
@@ -71,7 +75,13 @@ const expression = (n: ts.Node, buf: BufferList, pool: string[]) => {
       }
     })
   } else if (ts.isNumericLiteral(n)) {
-    console.log(n.text)
+    buf.append(CONSTANT_NUMBER)
+    const num = Number.parseFloat(n.text)
+    let text = num.toExponential()
+    if (text.length > num.toString().length) text = num.toString()
+    const buff = Buffer.from(text)
+    writeLength(buf, buff.length)
+    buf.append(text)
   } else if (ts.isImportDeclaration(n)) {
     const mod = n.moduleSpecifier
     if (!ts.isStringLiteral(mod)) throw SyntaxError('Is not supported: ' + n.getText())
@@ -91,13 +101,18 @@ const expression = (n: ts.Node, buf: BufferList, pool: string[]) => {
     buf.append(CONSTANT_ARROW_FUNCTION)
     writeBoolean(buf, n.modifiers && n.modifiers.length &&
       n.modifiers[0].kind === ts.SyntaxKind.AsyncKeyword)
-
+    writeArguments(buf, n.parameters, pool)
     const body = n.body
     let i = 0
     if (ts.isBlock(body)) body.forEachChild(() => void i++)
     else i = 1
     writeLength(buf, i)
     body.forEachChild(na => expression(na, buf, pool))
+  } else if (ts.isNewExpression(n)) {
+    buf.append(CONSTANT_NEW)
+    expression(n.expression, buf, pool)
+    writeLength(buf, n.arguments.length)
+    n.arguments.forEach(na => expression(na, buf, pool))
   } else console.log(ts.SyntaxKind[n.kind])
 }
 
@@ -122,6 +137,6 @@ const compile = (code: string) => {
   return b
 }
 export default compile
-const buffer = compile('import { Server } from "http"; Server(() => { console.log("Hello World!") })')
+const buffer = compile(readFileSync('test.ts').toString())
 buffer.pipe(createWriteStream('a.yoo'))
 console.log(buffer.length, buffer.slice())

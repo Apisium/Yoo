@@ -604,6 +604,39 @@ func GetValue(obj Any, key string) Any {
     }
   case *ObjectB:
     return (*o)[key]
+  case *Proxy:
+    return (*o.function)(o.object, PROXY_GET, key, nil)
   }
   return nil
+}
+
+type ProxyFunction func (object Any, t int, key string, value Any) Any
+type Proxy struct {
+  object Any
+  function *ProxyFunction
+}
+
+func IsObject(obj Any) bool {
+  switch obj.(type) {
+  case *Object0:
+    return true
+  case *Object1:
+    return true
+  case *Object2:
+    return true
+  case *Object4:
+    return true
+  case *Object8:
+    return true
+  case *Object16:
+    return true
+  case *ObjectA:
+    return true
+  case *ObjectB:
+    return true
+  case *Proxy:
+    return true
+  default:
+    return false
+  }
 }

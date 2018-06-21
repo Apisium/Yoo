@@ -39,7 +39,7 @@ func NewMember(ba *ByteArray, pool *[]string) (*Member, error) {
   if err != nil { return nil, err }
   right, err := expression(ba, pool)
   if err != nil { return nil, err }
-  return &Member{ left: &left, right: &right }, nil
+  return &Member{ left: left, right: right }, nil
 }
 
 type VariableElement struct {
@@ -56,7 +56,7 @@ func NewVariable(ba *ByteArray, pool *[]string) (*Variable, error) {
     if err != nil { return nil, err }
     right, err := expression(ba, pool)
     if err != nil { return nil, err }
-    vars[i] = &VariableElement{ name: left.(*Identifier), value: &right }
+    vars[i] = &VariableElement{ name: left.(*Identifier), value: right }
   }
   return &vars, nil
 }
@@ -88,10 +88,13 @@ func NewImport(ba *ByteArray, pool *[]string) (*Import, error) {
 
 type ArrowFunction struct {
   async bool
+  args *Variable
   body *Block
 }
 func NewArrowFunction(ba *ByteArray, pool *[]string) (*ArrowFunction, error) {
   async, err := expression(ba, pool)
+  if err != nil { return nil, err }
+  args, err := NewVariable(ba, pool)
   if err != nil { return nil, err }
   length, err := ba.ReadInt16()
   if err != nil { return nil, err }
@@ -102,5 +105,5 @@ func NewArrowFunction(ba *ByteArray, pool *[]string) (*ArrowFunction, error) {
     if err != nil { return nil, err }
     block[i] = expr
   }
-  return &ArrowFunction{ async: async.(bool), body: &block }, nil
+  return &ArrowFunction{ async: async.(bool), args: args, body: &block }, nil
 }
