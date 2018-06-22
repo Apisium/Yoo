@@ -75,14 +75,36 @@ type Object16 struct {
   k15 string
   v15 Any
 }
-type ObjectA struct {
-  name string
-  value Any
-  next *ObjectA
+type ObjectA map[string]Any
+type ProxyFunction func (object Any, t int, key string, value Any) Any
+type Proxy struct {
+  object Any
+  function *ProxyFunction
 }
-type ObjectB map[string]Any
 
-func CreateObject(keys []string, props []Any) Any {
+func CreateObjectByLength(length int) Any {
+  switch {
+  case length < 1:
+    return &Object0{}
+  case length == 1:
+    return &Object1{}
+  case length == 2:
+    return &Object2{}
+  case length < 5:
+    return &Object4{}
+  case length < 9:
+    return &Object8{}
+  case length < 17:
+    return &Object16{}
+  default:
+    obj := make(ObjectA, length)
+    return &obj
+  }
+}
+
+func CreateObject(keysPtr *[]string, propsPtr *[]Any) Any {
+  keys := *keysPtr
+  props := *propsPtr
   length := len(keys)
 
   if length < 1 { return &Object0{ } }
@@ -405,18 +427,11 @@ func CreateObject(keys []string, props []Any) Any {
       v15: props[15],
     }
   default:
-    if length < 40 {
-      obj := &ObjectA{ name: keys[0], value: props[0] }
-      for i := 1; i < length; i++ {
-        obj.next = &ObjectA{ name: keys[i], value: props[i] }
-      }
-      return obj
-    }
-    obj := make(ObjectB, length)
+    obj := make(ObjectA, length)
     for i := 0; i < length; i++ {
       obj[keys[i]] = props[i]
     }
-    return obj
+    return &obj
   }
 }
 
@@ -499,18 +514,9 @@ func SetValue(obj Any, key string, value Any) {
       o.v15 = value
     }
   case *ObjectA:
-    var oo Any = o
-    for oo != nil {
-      o = oo.(*ObjectA)
-      if o.name == key {
-        o.value = value
-        break
-      } else {
-        oo = o.next
-      }
-    }
-  case *ObjectB:
     (*o)[key] = value
+  case *Proxy:
+    (*o.function)(o.object, PROXY_SET, key, value)
   }
 }
 
@@ -593,27 +599,11 @@ func GetValue(obj Any, key string) Any {
       return o.v15
     }
   case *ObjectA:
-    var oo Any = o
-    for oo != nil {
-      o = oo.(*ObjectA)
-      if o.name == key {
-        return o.value
-      } else {
-        oo = o.next
-      }
-    }
-  case *ObjectB:
     return (*o)[key]
   case *Proxy:
     return (*o.function)(o.object, PROXY_GET, key, nil)
   }
   return nil
-}
-
-type ProxyFunction func (object Any, t int, key string, value Any) Any
-type Proxy struct {
-  object Any
-  function *ProxyFunction
 }
 
 func IsObject(obj Any) bool {
@@ -631,8 +621,6 @@ func IsObject(obj Any) bool {
   case *Object16:
     return true
   case *ObjectA:
-    return true
-  case *ObjectB:
     return true
   case *Proxy:
     return true

@@ -16,4 +16,5 @@ const (
   CONSTANT_NEW = 0x11
 
   PROXY_GET = 0
+  PROXY_SET = 1
 )

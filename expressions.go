@@ -107,3 +107,22 @@ func NewArrowFunction(ba *ByteArray, pool *[]string) (*ArrowFunction, error) {
   }
   return &ArrowFunction{ async: async.(bool), args: args, body: &block }, nil
 }
+
+type MakeClass struct {
+  class Any
+  args *[]Any
+}
+func NewMakeClass(ba *ByteArray, pool *[]string) (*MakeClass, error) {
+  callee, err := expression(ba, pool)
+  if err != nil { return nil, err }
+  length, err := ba.ReadInt16()
+  if err != nil { return nil, err }
+
+  args := make([]Any, length, length)
+  for i := int16(0); i < length; i++ {
+    arg, err := expression(ba, pool)
+    if err != nil { return nil, err }
+    args[i] = &arg
+  }
+  return &MakeClass{ class: callee, args: &args }, nil
+}
