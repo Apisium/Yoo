@@ -1,9 +1,9 @@
-import { Server } from 'net/http'
+// import { Server } from 'net/http'
 
-const app = Server(ctx => {
-  console.log('Hello World!', ctx.method)
-}, 1234)
-app.listen()
+// const app = Server(ctx => {
+console.log('Hello World!')
+// }, 1234)
+// app.listen()
 
 // import { createServer } from 'http'
 

@@ -1,6 +1,7 @@
 package yoo
 
 import (
+  "math"
   "errors"
   "encoding/binary"
 )
@@ -130,6 +131,15 @@ func (this *ByteArray) ReadByte() (b byte, err error) {
   return
 }
 
+func (this *ByteArray) ReadLength() (ret int, err error) {
+  i := 0
+  for _tk, b := true, 0; _tk || (err == nil && b == 255); _tk = false {
+    b, err = this.ReadByte()
+  }
+  ret = int(math.Pow(256, i)) - 1 + b
+  return
+}
+
 func (this *ByteArray) ReadInt8() (ret int8, err error) {
   err = binary.Read(this, this.endian, &ret)
   return
@@ -183,13 +193,6 @@ func (this *ByteArray) ReadString(length int) (ret string, err error) {
   } else {
     ret = "";
   }
-  return
-}
-
-func (this *ByteArray) ReadBytesA(length int) (ret *ByteArray, err error) {
-  bytes := make([]byte, length, length)
-  _, err = this.ReadBytes(bytes, length, 0)
-  if err == nil { ret = CreateByteArray(bytes) }
   return
 }
 

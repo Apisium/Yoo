@@ -1,6 +1,18 @@
 package yoo
 
 type Block []Any
+func NewBlock(ba *ByteArray, pool *[]string) (*Block, error) {
+  length, err := ba.ReadInt16()
+  if err != nil { return nil, err }
+
+  block := make(Block, length, length)
+  for i := int16(0); i < length; i++ {
+    expr, err := expression(ba, pool)
+    if err != nil { return nil, err }
+    block[i] = expr
+  }
+  return &block, nil
+}
 
 type Identifier struct {
   text string
@@ -96,16 +108,9 @@ func NewArrowFunction(ba *ByteArray, pool *[]string) (*ArrowFunction, error) {
   if err != nil { return nil, err }
   args, err := NewVariable(ba, pool)
   if err != nil { return nil, err }
-  length, err := ba.ReadInt16()
+  block, err := NewBlock(ba, pool)
   if err != nil { return nil, err }
-
-  block := make(Block, length, length)
-  for i := int16(0); i < length; i++ {
-    expr, err := expression(ba, pool)
-    if err != nil { return nil, err }
-    block[i] = expr
-  }
-  return &ArrowFunction{ async: async.(bool), args: args, body: &block }, nil
+  return &ArrowFunction{ async: async.(bool), args: args, body: block }, nil
 }
 
 type MakeClass struct {
